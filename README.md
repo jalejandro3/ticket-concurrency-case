@@ -116,11 +116,11 @@ Effect: fewer possible sales than there should be. The opposite problem to overs
 
 ```sql
 SELECT 
-    e.name                          AS event_name,
+    e.name AS event_name,
     e.total_capacity,
-    COUNT(t.id)                     AS tickets_created,
-    SUM(t.status = 'paid')          AS tickets_paid,
-    e.total_capacity - COUNT(t.id)  AS difference
+    COUNT(t.id) AS tickets_created,
+    SUM(t.status = 'paid') AS tickets_paid,
+    e.total_capacity - COUNT(t.id) AS difference
 FROM events e
 LEFT JOIN tickets t ON t.event_id = e.id
 WHERE e.id = 1
@@ -154,6 +154,3 @@ Each branch documents its own trade-offs in its corresponding README.
 ## Learning Context
 
 This case study is part of a structured learning path on high-demand backend systems. The goal is to understand concurrency problems from first principles, without frameworks abstracting away what is actually happening at the database level.
-
-Author: José Alejandro  
-Reference: [Designing Data-Intensive Applications — Martin Kleppmann](https://dataintensive.net/)
