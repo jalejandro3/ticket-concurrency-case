@@ -21,7 +21,8 @@ $pdo = new PDO(
 
 $service = new TicketService(
     eventRepository: new MysqlEventRepository($pdo),
-    ticketRepository: new MysqlTicketRepository($pdo)
+    ticketRepository: new MysqlTicketRepository($pdo),
+    pdo: $pdo
 );
 
 $method = $_SERVER['REQUEST_METHOD'];

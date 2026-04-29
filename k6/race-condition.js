@@ -12,6 +12,9 @@ const reservedFail = new Counter('tickets_no_availability');
 export const options = {
     vus: 200,
     duration: '10s',
+    thresholds: {
+        'checks{check:no server errors}': ['rate>0.99'],
+    },
 };
 
 export default function () {
@@ -31,7 +34,7 @@ export default function () {
     }
 
     check(res, {
-        'status is 201 or 409': (r) => r.status === 201 || r.status === 409,
+        'no server errors': (r) => r.status < 500,
     });
 }
 

@@ -8,7 +8,7 @@ class MysqlEventRepository implements EventRepository
 
     public function findById(int $id): Event
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM events WHERE id = :id");
+        $stmt = $this->pdo->prepare("SELECT * FROM events WHERE id = :id FOR UPDATE");
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
