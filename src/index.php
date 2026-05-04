@@ -9,6 +9,7 @@ require_once 'TicketRepository.php';
 require_once 'MysqlEventRepository.php';
 require_once 'MysqlTicketRepository.php';
 require_once 'TicketService.php';
+require_once 'ConcurrencyException.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -21,7 +22,8 @@ $pdo = new PDO(
 
 $service = new TicketService(
     eventRepository: new MysqlEventRepository($pdo),
-    ticketRepository: new MysqlTicketRepository($pdo)
+    ticketRepository: new MysqlTicketRepository($pdo),
+    pdo: $pdo
 );
 
 $method = $_SERVER['REQUEST_METHOD'];
@@ -51,10 +53,11 @@ if ($method === 'POST' && $path === '/reserve') {
             'user_id'    => $ticket->userId,
             'expires_at' => $ticket->expiresAt->format('Y-m-d H:i:s'),
         ], JSON_UNESCAPED_UNICODE);
-    } catch (NoAvailabilityException $e) {
+    } catch (NoAvailabilityException|ConcurrencyException $e) {
         http_response_code(409);
         echo json_encode(['error' => 'No tickets available'], JSON_UNESCAPED_UNICODE);
     } catch (Throwable $e) {
+        error_log("500 error: " . get_class($e) . " - " . $e->getMessage());
         http_response_code(500);
         echo json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }

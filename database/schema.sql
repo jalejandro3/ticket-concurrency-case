@@ -2,7 +2,8 @@ CREATE TABLE IF NOT EXISTS events (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(255) NOT NULL,
     total_capacity INT NOT NULL,
-    available_capacity INT NOT NULL
+    available_capacity INT NOT NULL,
+    version INT NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS tickets (

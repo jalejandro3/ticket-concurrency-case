@@ -21,10 +21,21 @@ class MysqlEventRepository implements EventRepository
 
     public function save(Event $event): void
     {
-        $stmt = $this->pdo->prepare("UPDATE events SET available_capacity = :capacity WHERE id = :id");
+        $currentVersion = $event->version;
+        $newVersion = $currentVersion + 1;
+
+        $stmt = $this->pdo->prepare("UPDATE events SET version = :new_version, available_capacity = :capacity WHERE id = :id AND version = :current_version");
         $stmt->execute([
+            'current_version'  => $currentVersion,
+            'new_version' => $newVersion,
             'capacity' => $event->availableCapacity,
             'id'       => $event->id,
         ]);
+
+        $updatedRow = $stmt->rowCount();
+
+        if ($updatedRow === 0) {
+            throw new RuntimeException("Concurrency error: event was updated by another process");
+        }
     }
 }

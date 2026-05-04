@@ -23,6 +23,7 @@ services:
     working_dir: /app
     volumes:
       - ./src:/app
+      - ./php-fpm.conf:/usr/local/etc/php-fpm.d/www.conf
     depends_on:
       mysql:
         condition: service_healthy
