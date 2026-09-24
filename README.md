@@ -108,4 +108,4 @@ It is the wrong choice for a ticket launch. This branch exists precisely to demo
 
 **There is no better strategy in the abstract — it depends on the level of contention.** That is the conclusion of the case study.
 
-Compare with [`solution/pessimistic-locking`](../../tree/solution/pessimistic-locking).
+Compare with [`solution/pessimistic-locking`](https://github.com/jalejandro3/ticket-concurrency-case/tree/solution/pessimistic-locking).
