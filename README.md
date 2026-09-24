@@ -1,67 +1,66 @@
-# TicketFlow — Case Study: Race Condition in Ticket Reservation
+# Solution: Optimistic Locking
 
-> A real-world case study on concurrency in high-demand backend systems.  
-> Built as a structured learning exercise and technical portfolio artifact.
-
----
-
-## The Problem
-
-On a Monday morning, the product team sends this message:
-
-> *"On Friday we launched tickets for Festival Estereo Picnic. We had 3,000 tickets available. We sold 3,247. There are 247 people with a paid ticket for an event that cannot accommodate them."*
-
-This repository documents the diagnosis, bug reproduction, and two solutions with different trade-offs.
+> Branch: `solution/optimistic-locking`
+> Fixes the race condition documented in [`main`](../../tree/main) by detecting conflict at write time instead of preventing it.
 
 ---
 
-## Repository Structure
+## The Idea
+
+Optimistic locking assumes conflict is **unlikely**. Nothing is locked. Every transaction proceeds as if it were alone, and the conflict is caught at the moment of writing: if the row changed since it was read, the write fails and the operation is retried.
+
+The bet is that most of the time nobody else touched the row, so paying the cost of a lock on every request is wasteful.
+
+---
+
+## The Fix
+
+A `version` column is added to `events`. The read captures the version; the write only succeeds if the version is still the same.
+
+```sql
+-- 1. Read capacity AND version. No lock.
+SELECT available_capacity, version
+FROM events
+WHERE id = ?;
+
+-- 2. Guard: if there is no capacity, reject.
+
+-- 3. Write, conditioned on the version not having changed.
+UPDATE events
+SET available_capacity = available_capacity - 1,
+    version = version + 1
+WHERE id = ?
+  AND version = ?;   -- the version read in step 1
+```
+
+If `affected_rows = 0`, someone else committed first. The read was stale, the transaction is rolled back and the whole operation is retried from step 1.
 
 ```
-main                           ← production system with the bug
-├── solution/pessimistic-locking
-└── solution/optimistic-locking
+attempt 1 → version mismatch → retry
+attempt 2 → version mismatch → retry
+attempt 3 → success
 ```
+
+Retries are bounded. When the limit is exhausted the request fails rather than looping forever.
 
 ---
 
-## How to Reproduce the Problem
-
-### Requirements
-
-- Docker and Docker Compose
-
-### Start the system
+## Running It
 
 ```bash
+git checkout solution/optimistic-locking
 docker compose up -d
 ```
 
-Wait 10–15 seconds for MySQL to be ready.
-
-### Verify initial state
+Wait 10–15 seconds for MySQL, then:
 
 ```bash
 curl http://localhost:8080/status?event_id=1
-```
-
-You should see `total_capacity: 3000` and `tickets_created: 0`.
-
-### Run the concurrency test
-
-```bash
 docker compose --profile testing run k6 run /scripts/race-condition.js
-```
-
-### Verify the overselling
-
-```bash
 curl http://localhost:8080/status?event_id=1
 ```
 
-If `tickets_created` exceeds `total_capacity`, the bug is confirmed.
-
-### Reset and repeat
+Reset between runs:
 
 ```bash
 curl http://localhost:8080/reset?event_id=1
@@ -69,88 +68,44 @@ curl http://localhost:8080/reset?event_id=1
 
 ---
 
-## Diagnosis
+## Results
 
-### Root cause: race condition
+| Metric | Pessimistic | This branch |
+| --- | --- | --- |
+| Total capacity | 3,000 | 3,000 |
+| Tickets created | 3,000 | ~1,004 |
+| Overselling | None | **None** |
+| Failures | Rejected at capacity | Rejected by **retry exhaustion** |
 
-The reservation process has four steps:
+**This is the finding that matters.** Both strategies are correct — neither oversells. But under the contention this load test produces, optimistic locking never sold the remaining tickets: attempts kept colliding on the same row and exhausted their retries before succeeding.
 
-```
-1. SELECT available_capacity FROM events WHERE id = ?
-2. IF available_capacity <= 0 → reject
-3. INSERT INTO tickets ...
-4. UPDATE events SET available_capacity = value_read_in_step_1 - 1
-```
-
-The problem is that steps 1 and 4 **are not atomic**. Between the read and the write, another process can read the same value.
-
-**Sequence that produces overselling:**
-
-```
-Time    │ User A                           │ User B
-────────┼──────────────────────────────────┼──────────────────────────────────
-t1      │ SELECT → available_capacity = 1  │
-t2      │                                  │ SELECT → available_capacity = 1
-t3      │ IF 1 > 0 → proceed ✓             │
-t4      │                                  │ IF 1 > 0 → proceed ✓
-t5      │ INSERT ticket A                  │
-t6      │                                  │ INSERT ticket B
-t7      │ UPDATE → available_capacity = 0  │
-t8      │                                  │ UPDATE → available_capacity = 0
-────────┴──────────────────────────────────┴──────────────────────────────────
-Result: 2 tickets created, available_capacity = 0
-        Real capacity should be: -1
-```
-
-Both users read `available_capacity = 1`, both passed the guard, and both wrote `available_capacity = 0`. The last writer overwrote the first.
-
-### Secondary bug: phantom inventory
-
-Tickets in `reserved` status that are never paid block real capacity without generating a confirmed sale. The system has no process to release those tickets when `expires_at` is reached.
-
-Effect: fewer possible sales than there should be. The opposite problem to overselling, but equally damaging in a high-demand event launch.
+Correctness was preserved. Throughput was not. Roughly two thirds of the inventory went unsold, not because capacity ran out, but because the strategy gave up.
 
 ---
 
-## Diagnostic Query
+## Trade-offs
 
-```sql
-SELECT 
-    e.name AS event_name,
-    e.total_capacity,
-    COUNT(t.id) AS tickets_created,
-    SUM(t.status = 'paid') AS tickets_paid,
-    e.total_capacity - COUNT(t.id) AS difference
-FROM events e
-LEFT JOIN tickets t ON t.event_id = e.id
-WHERE e.id = 1
-GROUP BY e.id, e.name, e.total_capacity;
-```
+**What it buys you**
 
-If `difference` is negative, overselling has occurred.
+- **No locks and no waiting.** Under low contention it is faster than pessimistic locking, because the cost of conflict is only paid when conflict actually happens.
+- **No deadlocks.** There is nothing to deadlock on.
+- **Scales better horizontally** when writes to the same row are rare.
+
+**What it costs you**
+
+- **It collapses under contention**, as the numbers above show. The higher the contention, the more retries, and retries are wasted work.
+- **Retry policy becomes a design decision**: how many attempts, how long to back off between them, whether to add jitter to stop clients retrying in lockstep.
+- **Failure is harder to explain to a user.** "Sold out" is understandable; "we could not complete your request, try again" is not, especially when tickets are still available.
+- **More application logic** — and therefore more places to get it wrong.
 
 ---
 
-## Solutions
+## When To Use It
 
-See the branches:
+Optimistic locking fits where **writes to the same row are rare and reads are frequent**: editing a profile, updating a document, back-office operations, anything where two people touching the same record at the same instant is the exception.
 
-- `solution/pessimistic-locking` — pessimistic locking with `SELECT ... FOR UPDATE`
-- `solution/optimistic-locking` — optimistic locking with versioning
+It is the wrong choice for a ticket launch. This branch exists precisely to demonstrate that: the same strategy that is elegant in a CRUD application becomes a throughput problem when three thousand people press *buy* at the same second.
 
-Each branch documents its own trade-offs in its corresponding README.
+**There is no better strategy in the abstract — it depends on the level of contention.** That is the conclusion of the case study.
 
----
-
-## Stack
-
-- PHP 8.2 (no framework, plain PDO)
-- MySQL 8.0
-- Docker / Docker Compose
-- k6 (load testing)
-
----
-
-## Learning Context
-
-This case study is part of a structured learning path on high-demand backend systems. The goal is to understand concurrency problems from first principles, without frameworks abstracting away what is actually happening at the database level.
+Compare with [`solution/pessimistic-locking`](../../tree/solution/pessimistic-locking).
