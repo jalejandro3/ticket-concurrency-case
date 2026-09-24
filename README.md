@@ -113,4 +113,4 @@ Pessimistic locking is the right default when **contention is high and the cost 
 
 The serialisation it imposes is a feature, not a bug. In a ticket launch you would rather have a slower queue than 247 people holding tickets for seats that do not exist.
 
-Compare with [`solution/optimistic-locking`](../../tree/solution/optimistic-locking), which makes the opposite bet.
+Compare with [`solution/optimistic-locking`](https://github.com/jalejandro3/ticket-concurrency-case/tree/solution/optimistic-locking), which makes the opposite bet.
